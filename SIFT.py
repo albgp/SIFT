@@ -4,6 +4,8 @@ import logging
 from PIL import Image
 from cv2 import resize, GaussianBlur, subtract, KeyPoint, INTER_LINEAR, INTER_NEAREST
 from math import log2, sqrt
+from functools import reduce
+import operator
 
 
 logging.basicConfig(filename="logFile",
@@ -13,13 +15,15 @@ logging.basicConfig(filename="logFile",
                             level=logging.DEBUG)
 logger = logging.getLogger(__name__)  
 
+def rgb2gray(rgb):
+    return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
 
 
 
 
 class Pyramid:
     """
-    Hola
+    Creates the DoG and Gaussian Pyramids for the given images
     """
     def __init__(self, img, params):
         self.img=img
@@ -88,10 +92,57 @@ class Pyramid:
         return self.DoG, self.octaves
 
 
+class LocateKeypoints:
+    def __init__(self, g_pyr, dog_pyr, params):
+        self.g_pyr=g_pyr 
+        self.dog_pyr=dog_pyr 
+        self.keypoints=[]
+        self.threshold=params["detection_threshold"]
+
+    def getSetupExtrema(self, top, center, bottom):
+        w,h=center.shape
+        keypoints=[]
+        for i in range(1, w-1):
+            for j in range(1,h-1):
+                value_center=center[i,j]
+                if value_center > self.threshold:
+                    greater=0
+                    lower=0
+                    for d_i in [-1,0,1]:
+                        for d_j in [-1,0,1]:
+                            for pxval in [top[i+d_i,j+d_j],bottom[i+d_i,j+d_j]]:
+                                if pxval>=value_center:
+                                    greater+=1
+                                elif pxval<=value_center:
+                                    lower+=1
+                            if d_i==d_j==0: continue
+                            pxval=center[i+d_i,j+d_j]
+                            if pxval>=value_center:
+                                greater+=1
+                            elif pxval<=value_center:
+                                lower+=1
+                    if greater==26 or lower==26:
+                        keypoints.append((i,j))
+        return keypoints
+    
+    def localize(self,):
+        pass
+
+    def getOrientation(self,):
+        pass
+
+    def locateKeypoints(self):
+        self.kp=[]
+        for octave in self.octaves:
+            for i in range(len(octave)-2):
+                extrema=getSetupExtrema(octave[i+2],octave[i+1],octave[i])
+                for pt in extrema():
+                    localization_result=localize(pt)
+    
+    def computeAll(self):
+        self.locateKeypoints()
 
 
-def rgb2gray(rgb):
-    return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
 
 
 class SIFT:
@@ -106,6 +157,7 @@ class SIFT:
     def calculateKeyPoints(self):
         Pyr=Pyramid(self.img, self.params)
         self.DoG, self.octaves = Pyr.computeAll()
+        lkp=LocateKeypoints(self.octaves, self.DoG, self.params)
 
 
 

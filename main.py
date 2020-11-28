@@ -7,7 +7,8 @@ params={
         "sigma":1.6,
         "visual_debug":True,
         "img_name":"/home/alberto/Documents/CV/M0_SIFT/fotonoticia_20200402133510_420.jpg",
-        "assumed_blur":0.5
+        "assumed_blur":0.5,
+        "detection_threshold":10
     }
 
 if __name__=="__main__":
