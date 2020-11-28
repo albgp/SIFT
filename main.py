@@ -3,12 +3,12 @@ from PIL import Image
 import cv2
 
 params={
-        "s":8,
-        "sigma":1.6,
+        "s":3, #Pg 9 of Lowe's paper
+        "sigma":1.6, #Pg 10 of Lowe's paper
         "visual_debug":True,
         "img_name":"/home/alberto/Documents/CV/M0_SIFT/fotonoticia_20200402133510_420.jpg",
-        "assumed_blur":0.5,
-        "detection_threshold":10
+        "assumed_blur":0.5, #Pg 10 of Lowe's paper
+        "detection_threshold":10 #???
     }
 
 if __name__=="__main__":
