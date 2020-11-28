@@ -14,7 +14,7 @@ params={
 if __name__=="__main__":
     sift=SIFT.SIFT(params)
     sift.calculateKeyPoints()
-    print(sift.DoG)
+    #print(sift.DoG)
     for i,octave in enumerate(sift.octaves):
         for j,img in enumerate(octave):
             im = Image.fromarray(img).convert('RGB')
