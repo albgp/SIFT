@@ -2,3 +2,6 @@ logFile
 __pycache__/includes.cpython-38.pyc
 __pycache__/SIFT.cpython-38.pyc
 imagesTest/*
+fotonoticia_20200402133510_420.jpg
+SIFT_Test.ipynb
+.vscode/*
