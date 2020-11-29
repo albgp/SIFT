@@ -8,8 +8,13 @@ params={
         "visual_debug":True,
         "img_name":"/home/alberto/Documents/CV/M0_SIFT/fotonoticia_20200402133510_420.jpg",
         "assumed_blur":0.5, #Pg 10 of Lowe's paper
-        "detection_threshold":10 #???
+        "detection_threshold":10, #???
+        "contrast_threshold":0.04,
+        "eigenvalue_ratio":10,
+        "img":None,
+        "convergence_attempts":5,
     }
+
 
 if __name__=="__main__":
     sift=SIFT.SIFT(params)
