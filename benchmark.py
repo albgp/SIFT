@@ -28,6 +28,8 @@ def compareEfficiency():
                 "detection_threshold":10, #???
                 "contrast_threshold":0.04,
                 "eigenvalue_ratio":10,
+                "convergence_attempts":5,
+                "image_border_width":5
             }
         )
         sift.calculateKeyPoints()

@@ -148,16 +148,17 @@ class LocateKeypoints:
             
             x += int(round(update[0]))
             y += int(round(update[1]))
-            index_octv += int(round(extremum_update[2]))
+            index_octv += int(round(update[2]))
 
+            image_border_width=self.params["image_border_width"]
 
             if (x < image_border_width or x >= img_shape[0] - image_border_width or 
             y < image_border_width or y >= img_shape[1] - image_border_width or 
-            image_index < 1 or image_index > num_intervals):
+            index_img < 1 or index_img >= num_intervals-1):
                 outside_image = True
                 break
 
-            top,center,bottom=octv[index_octv+1],octv[index_octv],octv[index_octv-1]
+            top,center,bottom=octv[index_img+1],octv[index_img],octv[index_img-1]
 
         if outside_image:
             logger.debug(f'Updated extremum {x},{y} moved outside of image before reaching convergence. Skipping...')
@@ -179,9 +180,9 @@ class LocateKeypoints:
                 keypoint = KeyPoint()
                 keypoint.pt = ((y + update[0]) * (2 ** index_octv), (x + update[1]) * (2 ** index_octv))
                 keypoint.octave = index_octv + index_img * (2 ** 8) + int(round((update[2] + 0.5) * 255)) * (2 ** 16)
-                keypoint.size = sigma * (2 ** ((index_img + update[2]) / float32(num_intervals))) * (2 ** (index_octv + 1))  # octave_index + 1 because the input image was doubled
+                keypoint.size = self.params["sigma"] * (2 ** ((index_img + update[2]) / float32(num_intervals))) * (2 ** (index_octv + 1))  # octave_index + 1 because the input image was doubled
                 keypoint.response = abs(functionValueAtUpdatedExtremum)
-                return keypoint, image_index
+                return keypoint, index_img
         return None
 
 

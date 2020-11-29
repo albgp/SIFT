@@ -13,6 +13,7 @@ params={
         "eigenvalue_ratio":10,
         "img":None,
         "convergence_attempts":5,
+        "image_border_width":5
     }
 
 
