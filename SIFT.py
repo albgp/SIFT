@@ -99,6 +99,7 @@ class LocateKeypoints:
         self.keypoints=[]
         self.params=params
         self.threshold=params["detection_threshold"]
+        self.kpos=[]
 
     def getSetupExtrema(self, top, center, bottom):
         w,h=center.shape
@@ -182,7 +183,7 @@ class LocateKeypoints:
                 keypoint.octave = index_octv + index_img * (2 ** 8) + int(round((update[2] + 0.5) * 255)) * (2 ** 16)
                 keypoint.size = self.params["sigma"] * (2 ** ((index_img + update[2]) / float32(num_intervals))) * (2 ** (index_octv + 1))  # octave_index + 1 because the input image was doubled
                 keypoint.response = abs(functionValueAtUpdatedExtremum)
-                return keypoint, index_img
+                return keypoint, index_img, index_octv
         return None
 
 
@@ -209,9 +210,60 @@ class LocateKeypoints:
             cube[2, 1, 1] - cube[0, 1, 1]
         ])/2
 
+    def calculateOrientation(self, kp, img_index, octv_index):
+        img=self.g_pyr[octv_index][img_index]
+        img_shape=img.shape 
+        scale = self.params["scale_factor"]*kp.size/(2**(octv_index+1))
+        rad = int(round(self.params["radius_factor"]*scale))
+        weight_factor=-(scale*scale)/2
+        num_bins=self.params["num_bins"]
+        raw_histogram=zeros(num_bins)
+        smooth_histogram=zeros(num_bins)
+
+        for i in range(-rad,rad+1):
+            reg_y=int(round(kp.pt[1]/(2**octv_index) ) )+i
+            if reg_y>0 and reg_y<img.shape[0]-1:
+                for j in range(-rad,rad+1):
+                    reg_x=int(round(kp.pt[0]/(2**octv_index) ) )+j
+                    if reg_x>0 and reg_x<img.shape[1]-1:
+                        dx=img[reg_y,reg_x+1]-img[reg_y,reg_x-1]
+                        dy=img[reg_y+1,reg_x]-img[reg_y-1,reg_x]
+                        grad_mag=sqrt(dx**2+dy**2)
+                        grad_orient=360/(2*pi)*arctan2(dy,dx)
+                        weight=exp(weight_factor*(i*i+j*j))
+                        hist_index=int(round(grad_orient*num_bins/360))
+                        raw_histogram[hist_index%num_bins]+=weight*grad_mag
+
+        for n in range(num_bins):
+            smooth_histogram[n] = (6 * raw_histogram[n] 
+                                    + 4 * (raw_histogram[n - 1] 
+                                    + raw_histogram[(n + 1) % num_bins]) 
+                                    + raw_histogram[n - 2] 
+                                    + raw_histogram[(n + 2) % num_bins]) / 16.
+            orientation_max = max(smooth_histogram)
+            orientation_peaks = where(
+                logical_and(
+                    smooth_histogram > roll(smooth_histogram, 1), smooth_histogram > roll(smooth_histogram, -1)
+                    )
+                )[0]
+            
+            for peak_indx in orientation_peaks:
+                peak_val=smooth_histogram[peak_indx]
+                if peak_val >= self.params["peak_ratio"] * orientation_max:
+                    left_value = smooth_histogram[(peak_indx - 1) % num_bins]
+                    right_value = smooth_histogram[(peak_indx + 1) % num_bins]
+                    interpolated_peak_indx = (peak_indx + 
+                                                0.5 * (left_value - right_value) / (left_value - 2 * peak_val + right_value)
+                                              ) % num_bins
+                    orientation = 360. - interpolated_peak_indx * 360. / num_bins
+                    if abs(orientation - 360.) < self.params["float_tol"]:
+                        orientation = 0
+                    new_kp = KeyPoint(*kp.pt, kp.size, orientation, kp.response, kp.octave)
+                    self.kpos.append(new_kp)
+
     def locateKeypoints(self):
         logger.debug('Localizing scale-space extrema...')
-        self.kp=[]
+        self.kps=[]
         extrema_found=0
         for noctave, octave in enumerate(self.dog_pyr):
             for i in range(1,len(octave)-1):
@@ -219,15 +271,135 @@ class LocateKeypoints:
                 for pt in extrema:
                     extrema_found+=1
                     logger.debug(f'Localizing the point: {pt}')
-                    localization_result=self.localize(
+                    ret=self.localize(
                         pt[0],pt[1],
                         octave[i+1],octave[i],octave[i-1],
                         i,noctave,octave)
+                    if ret:
+                        kp,img_index,octv_index=ret
+                        self.kps.append(kp)
+                        kpo=self.calculateOrientation(kp, img_index, octv_index)
+                        logger.debug(f'Found keypoint: {kp}')
         logger.debug(f'Number of extrema points found: {extrema_found}')
+
+    def unpackOctave(keypoint):
+        octave = keypoint.octave & 255
+        layer = (keypoint.octave >> 8) & 255
+        if octave >= 128:
+            octave = octave | -128
+        scale = 1 / float32(1 << octave) if octave >= 0 else float32(1 << -octave)
+        return octave, layer, scale
     
+    def computeDescriptors(self):
+        descriptors=[]
+        num_bins=self.params["num_bins_descriptor"]
+        window_width=self.params["window_width"]
+        scale_multiplier=self.params["scale_multiplier"]
+        descriptor_max_value=self.params["descriptor_max_val"]
+        for kp in self.kpos:
+            octave, layer, scale = LocateKeypoints.unpackOctave(kp)
+            gaussian_image = self.g_pyr[octave + 1][layer]
+            num_rows, num_cols = gaussian_image.shape
+            point = round(scale * array(kp.pt)).astype('int')
+            bins_per_degree = num_bins / 360.
+            angle = 360. - kp.angle
+            cos_angle = cos(deg2rad(angle))
+            sin_angle = sin(deg2rad(angle))
+            weight_multiplier = -0.5 / ((0.5 * window_width) ** 2)
+            row_bin_list = []
+            col_bin_list = []
+            magnitude_list = []
+            orientation_bin_list = []
+            histogram_tensor = zeros((window_width + 2, window_width + 2, num_bins))  
+
+            hist_width = scale_multiplier * 0.5 * scale * kp.size
+            half_width = int(round(hist_width * sqrt(2) * (window_width + 1) * 0.5))  
+            half_width = int(min(half_width, sqrt(num_rows ** 2 + num_cols ** 2)))   
+
+            for row in range(-half_width, half_width + 1):
+                for col in range(-half_width, half_width + 1):
+                    row_rot = col * sin_angle + row * cos_angle
+                    col_rot = col * cos_angle - row * sin_angle
+                    row_bin = (row_rot / hist_width) + 0.5 * window_width - 0.5
+                    col_bin = (col_rot / hist_width) + 0.5 * window_width - 0.5
+                    if row_bin > -1 and row_bin < window_width and col_bin > -1 and col_bin < window_width:
+                        window_row = int(round(point[1] + row))
+                        window_col = int(round(point[0] + col))
+                        if window_row > 0 and window_row < num_rows - 1 and window_col > 0 and window_col < num_cols - 1:
+                            dx = gaussian_image[window_row, window_col + 1] - gaussian_image[window_row, window_col - 1]
+                            dy = gaussian_image[window_row - 1, window_col] - gaussian_image[window_row + 1, window_col]
+                            gradient_magnitude = sqrt(dx * dx + dy * dy)
+                            gradient_orientation = rad2deg(arctan2(dy, dx)) % 360
+                            weight = exp(weight_multiplier * ((row_rot / hist_width) ** 2 + (col_rot / hist_width) ** 2))
+                            row_bin_list.append(row_bin)
+                            col_bin_list.append(col_bin)
+                            magnitude_list.append(weight * gradient_magnitude)
+                            orientation_bin_list.append((gradient_orientation - angle) * bins_per_degree)
+    
+            for row_bin, col_bin, magnitude, orientation_bin in zip(row_bin_list, col_bin_list, magnitude_list, orientation_bin_list):
+                row_bin_floor, col_bin_floor, orientation_bin_floor = floor([row_bin, col_bin, orientation_bin]).astype(int)
+                row_fraction, col_fraction, orientation_fraction = row_bin - row_bin_floor, col_bin - col_bin_floor, orientation_bin - orientation_bin_floor
+                if orientation_bin_floor < 0:
+                    orientation_bin_floor += num_bins
+                if orientation_bin_floor >= num_bins:
+                    orientation_bin_floor -= num_bins
+
+                c1 = magnitude * row_fraction
+                c0 = magnitude * (1 - row_fraction)
+                c11 = c1 * col_fraction
+                c10 = c1 * (1 - col_fraction)
+                c01 = c0 * col_fraction
+                c00 = c0 * (1 - col_fraction)
+                c111 = c11 * orientation_fraction
+                c110 = c11 * (1 - orientation_fraction)
+                c101 = c10 * orientation_fraction
+                c100 = c10 * (1 - orientation_fraction)
+                c011 = c01 * orientation_fraction
+                c010 = c01 * (1 - orientation_fraction)
+                c001 = c00 * orientation_fraction
+                c000 = c00 * (1 - orientation_fraction)
+
+                histogram_tensor[row_bin_floor + 1, col_bin_floor + 1, orientation_bin_floor] += c000
+                histogram_tensor[row_bin_floor + 1, col_bin_floor + 1, (orientation_bin_floor + 1) % num_bins] += c001
+                histogram_tensor[row_bin_floor + 1, col_bin_floor + 2, orientation_bin_floor] += c010
+                histogram_tensor[row_bin_floor + 1, col_bin_floor + 2, (orientation_bin_floor + 1) % num_bins] += c011
+                histogram_tensor[row_bin_floor + 2, col_bin_floor + 1, orientation_bin_floor] += c100
+                histogram_tensor[row_bin_floor + 2, col_bin_floor + 1, (orientation_bin_floor + 1) % num_bins] += c101
+                histogram_tensor[row_bin_floor + 2, col_bin_floor + 2, orientation_bin_floor] += c110
+                histogram_tensor[row_bin_floor + 2, col_bin_floor + 2, (orientation_bin_floor + 1) % num_bins] += c111
+            
+            descriptor_vector = histogram_tensor[1:-1, 1:-1, :].flatten()  # Remove histogram borders
+            # Threshold and normalize descriptor_vector
+            threshold = norm(descriptor_vector) * descriptor_max_value
+            descriptor_vector[descriptor_vector > threshold] = threshold
+            descriptor_vector /= max(norm(descriptor_vector), self.params["float_tol"])
+            # Multiply by 512, round, and saturate between 0 and 255 to convert from float32 to unsigned char (OpenCV convention)
+            descriptor_vector = round(512 * descriptor_vector)
+            descriptor_vector[descriptor_vector < 0] = 0
+            descriptor_vector[descriptor_vector > 255] = 255
+            descriptors.append(descriptor_vector)
+
+            self.descriptors=np.array(descriptors, dtype='float32')
+
     def computeAll(self):
         self.locateKeypoints()
+        self.computeDescriptors()
 
+
+class KeypointOrientations:
+    
+    def __init__(self, img, params, kps):
+        self.params=params
+        self.img=img 
+        self.kps=kps
+        self.bins=self.params["n_bins"]
+
+    def computeOrientation(self, kp):
+        pass
+
+    def computeAllOrientations(self):
+        logger.debug('Computing keypoint orientations')
+        orientated_kps=[]
 
 
 
@@ -239,15 +411,13 @@ class SIFT:
         else:
             self.img=np.array(Image.open(self.params["img_name"]))
             self.img=rgb2gray(self.img)
-    
-    def readDataset(self):
-        pass
 
     def calculateKeyPoints(self):
         Pyr=Pyramid(self.img, self.params)
         self.DoG, self.octaves = Pyr.computeAll()
         lkp=LocateKeypoints(self.octaves, self.DoG, self.params)
         lkp.computeAll()
+
 
 
 
