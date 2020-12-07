@@ -29,7 +29,16 @@ def compareEfficiency():
                 "contrast_threshold":0.04,
                 "eigenvalue_ratio":10,
                 "convergence_attempts":5,
-                "image_border_width":5
+                "image_border_width":5,
+                "radius_factor":3, 
+                "num_bins":36, 
+                "peak_ratio":0.8, 
+                "scale_factor":1.5,
+                "float_tol":1e-7,
+                "window_width":4, 
+                "num_bins_descriptor":8, 
+                "scale_multiplier":3, 
+                "descriptor_max_val":0.2
             }
         )
         sift.calculateKeyPoints()

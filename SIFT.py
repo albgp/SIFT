@@ -1,5 +1,9 @@
 import numpy as np
-from numpy import all, any, array, arctan2, cos, sin, exp, dot, log, logical_and, roll, sqrt, stack, trace, unravel_index, pi, deg2rad, rad2deg, where, zeros, floor, full, nan, isnan, round, float32
+from numpy import (all, any, array, arctan2, 
+                  cos, sin, exp, dot, log, logical_and, 
+                  roll, sqrt, stack, trace, unravel_index, 
+                  pi, deg2rad, rad2deg, where, zeros, floor, 
+                  full, nan, isnan, round, float32)
 import cv2
 from numpy.linalg import det, lstsq, norm
 import logging
@@ -186,7 +190,7 @@ class LocateKeypoints:
                 return keypoint, index_img, index_octv
         return None
 
-
+    @staticmethod
     def getHessian(cube):
         dii=cube[1, 1, 2] - 2 * cube[1,1,1] + cube[1, 1, 0]
         djj=cube[1, 2, 1] - 2 * cube[1,1,1] + cube[1, 0, 1]
@@ -202,7 +206,7 @@ class LocateKeypoints:
             ]
         )
 
-
+    @staticmethod
     def getGrad(cube):
         return np.array([ 
             cube[1, 1, 2] - cube[1, 1, 0],
@@ -222,10 +226,10 @@ class LocateKeypoints:
 
         for i in range(-rad,rad+1):
             reg_y=int(round(kp.pt[1]/(2**octv_index) ) )+i
-            if reg_y>0 and reg_y<img.shape[0]-1:
+            if reg_y>0 and reg_y<img_shape[0]-1:
                 for j in range(-rad,rad+1):
                     reg_x=int(round(kp.pt[0]/(2**octv_index) ) )+j
-                    if reg_x>0 and reg_x<img.shape[1]-1:
+                    if reg_x>0 and reg_x<img_shape[1]-1:
                         dx=img[reg_y,reg_x+1]-img[reg_y,reg_x-1]
                         dy=img[reg_y+1,reg_x]-img[reg_y-1,reg_x]
                         grad_mag=sqrt(dx**2+dy**2)
@@ -278,10 +282,11 @@ class LocateKeypoints:
                     if ret:
                         kp,img_index,octv_index=ret
                         self.kps.append(kp)
-                        kpo=self.calculateOrientation(kp, img_index, octv_index)
+                        self.calculateOrientation(kp, img_index, octv_index)
                         logger.debug(f'Found keypoint: {kp}')
         logger.debug(f'Number of extrema points found: {extrema_found}')
 
+    @staticmethod
     def unpackOctave(keypoint):
         octave = keypoint.octave & 255
         layer = (keypoint.octave >> 8) & 255
@@ -379,29 +384,22 @@ class LocateKeypoints:
             descriptor_vector[descriptor_vector > 255] = 255
             descriptors.append(descriptor_vector)
 
-            self.descriptors=np.array(descriptors, dtype='float32')
+        self.descriptors=np.array(descriptors, dtype='float32')
+
+    def convertKeypointsToInputImageSize(self):
+        """Convert keypoint point, size, and octave to input image size
+        """
+        converted_keypoints = []
+        for keypoint in self.kps:
+            keypoint.pt = tuple(0.5 * array(keypoint.pt))
+            keypoint.size *= 0.5
+            keypoint.octave = (keypoint.octave & ~255) | ((keypoint.octave - 1) & 255)
+            converted_keypoints.append(keypoint)
+        return converted_keypoints
 
     def computeAll(self):
         self.locateKeypoints()
         self.computeDescriptors()
-
-
-class KeypointOrientations:
-    
-    def __init__(self, img, params, kps):
-        self.params=params
-        self.img=img 
-        self.kps=kps
-        self.bins=self.params["n_bins"]
-
-    def computeOrientation(self, kp):
-        pass
-
-    def computeAllOrientations(self):
-        logger.debug('Computing keypoint orientations')
-        orientated_kps=[]
-
-
 
 class SIFT:
     def __init__(self, params):
@@ -417,7 +415,9 @@ class SIFT:
         self.DoG, self.octaves = Pyr.computeAll()
         lkp=LocateKeypoints(self.octaves, self.DoG, self.params)
         lkp.computeAll()
-
+        descs=lkp.descriptors
+        kpos=lkp.kpos
+        return kpos,descs
 
 
 
